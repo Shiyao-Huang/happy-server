@@ -24,8 +24,7 @@ export function rpcHandler(userId: string, socket: Socket, rpcListeners: Map<str
             rpcListeners.set(method, socket);
 
             socket.emit('rpc-registered', { method });
-            log({ module: 'websocket-rpc' }, `RPC method registered: ${method} on socket ${socket.id} (user: ${userId})`);
-            log({ module: 'websocket-rpc' }, `Active RPC methods for user ${userId}: ${Array.from(rpcListeners.keys()).join(', ')}`);
+            log({ module: 'websocket-rpc' }, `RPC method registered: ${method} on socket ${socket.id} (user: ${userId}, total: ${rpcListeners.size})`);
         } catch (error) {
             log({ module: 'websocket', level: 'error' }, `Error in rpc-register: ${error}`);
             socket.emit('rpc-error', { type: 'register', error: 'Internal error' });
@@ -80,7 +79,13 @@ export function rpcHandler(userId: string, socket: Socket, rpcListeners: Map<str
 
             const targetSocket = rpcListeners.get(method);
             if (!targetSocket || !targetSocket.connected) {
-                log({ module: 'websocket-rpc' }, `RPC call failed: Method ${method} not available (disconnected or not registered). Available methods: ${Array.from(rpcListeners.keys()).join(', ')}`);
+                // Proactively clean up dead entry to prevent repeated failures
+                if (targetSocket && !targetSocket.connected) {
+                    rpcListeners.delete(method);
+                    log({ module: 'websocket-rpc' }, `RPC call failed: Method ${method} target disconnected (socket ${targetSocket.id}), entry cleaned up`);
+                } else {
+                    log({ module: 'websocket-rpc' }, `RPC call failed: Method ${method} not registered`);
+                }
                 if (callback) {
                     callback({
                         ok: false,
@@ -158,13 +163,24 @@ export function rpcHandler(userId: string, socket: Socket, rpcListeners: Map<str
         }
 
         if (methodsToRemove.length > 0) {
-            log({ module: 'websocket-rpc' }, `Cleaning up RPC methods on disconnect for socket ${socket.id}: ${methodsToRemove.join(', ')}`);
+            log({ module: 'websocket-rpc' }, `Cleaning up ${methodsToRemove.length} RPC methods on disconnect for socket ${socket.id}`);
             methodsToRemove.forEach(method => rpcListeners.delete(method));
+        }
+
+        // Also sweep any stale entries from other disconnected sockets
+        const staleEntries: string[] = [];
+        for (const [method, registeredSocket] of rpcListeners.entries()) {
+            if (!registeredSocket.connected) {
+                staleEntries.push(method);
+            }
+        }
+        if (staleEntries.length > 0) {
+            log({ module: 'websocket-rpc' }, `Sweeping ${staleEntries.length} stale RPC entries for user ${userId}`);
+            staleEntries.forEach(method => rpcListeners.delete(method));
         }
 
         if (rpcListeners.size === 0) {
             rpcListeners.delete(userId);
-            // log({ module: 'websocket-rpc' }, `All RPC listeners removed for user ${userId}`);
         }
     });
 }
