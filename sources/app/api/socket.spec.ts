@@ -257,6 +257,28 @@ describe('startSocket', () => {
         expect(invalidateSession).not.toHaveBeenCalled();
     });
 
+    it('skips offline updates during graceful server shutdown disconnects', async () => {
+        startSocket({ server: {} } as any);
+        const socket = new FakeSocket({
+            token: 'valid-token',
+            clientType: 'session-scoped',
+            sessionId: 'session-1',
+        });
+
+        await connectionHandler!(socket);
+        vi.clearAllMocks();
+
+        await socket.trigger('disconnect', 'server shutting down');
+
+        expect(removeConnection).toHaveBeenCalledWith('user-1', expect.objectContaining({
+            connectionType: 'session-scoped',
+            sessionId: 'session-1',
+        }));
+        expect(sessionUpdateManyAndReturn).not.toHaveBeenCalled();
+        expect(invalidateSession).not.toHaveBeenCalled();
+        expect(emitEphemeral).not.toHaveBeenCalled();
+    });
+
     it('rejects session-scoped reconnect when the auth token is invalid', async () => {
         verifyToken.mockResolvedValue(null);
         startSocket({ server: {} } as any);

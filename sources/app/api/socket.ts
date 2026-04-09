@@ -141,7 +141,7 @@ export function startSocket(app: Fastify) {
             });
         }
 
-        socket.on('disconnect', async () => {
+        socket.on('disconnect', async (reason?: string) => {
             websocketEventsCounter.inc({ event_type: 'disconnect' });
 
             // Cleanup connections
@@ -149,6 +149,10 @@ export function startSocket(app: Fastify) {
             decrementWebSocketConnection(connection.connectionType);
 
             log({ module: 'websocket' }, `User disconnected: ${userId}`);
+
+            if (reason === 'server shutting down') {
+                return;
+            }
 
             // Broadcast daemon offline status
             if (connection.connectionType === 'machine-scoped') {
